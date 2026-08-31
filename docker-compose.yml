@@ -1,0 +1,84 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: retail_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: retail_support
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ROOT
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d retail_support"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  order_mcp:
+    build: .
+    container_name: retail_order_mcp
+    restart: unless-stopped
+    command: python -m uvicorn mcp_servers.order.server:app --host 0.0.0.0 --port 8101
+    ports:
+      - "8101:8101"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: retail_support
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ROOT
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  product_mcp:
+    build: .
+    container_name: retail_product_mcp
+    restart: unless-stopped
+    command: python -m uvicorn mcp_servers.product.server:app --host 0.0.0.0 --port 8102
+    ports:
+      - "8102:8102"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: retail_support
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ROOT
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    container_name: retail_support_api
+    restart: unless-stopped
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      AGENT_FRAMEWORK: ${AGENT_FRAMEWORK:-langgraph}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: retail_support
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ROOT
+      ORDER_MCP_URL: http://order_mcp:8101/mcp
+      PRODUCT_MCP_URL: http://product_mcp:8102/mcp
+      CHROMA_PERSIST_DIR: /app/data/chroma
+    volumes:
+      - chroma_data:/app/data/chroma
+    depends_on:
+      order_mcp:
+        condition: service_started
+      product_mcp:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  chroma_data:
